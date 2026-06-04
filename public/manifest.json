@@ -1,0 +1,35 @@
+{
+  "name": "cansat-gcs",
+  "short_name": "CanSat GCS",
+  "description": "Professional Ground Control Software for CanSat missions",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0a0e27",
+  "theme_color": "#00d9ff",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%230a0e27' width='192' height='192'/><circle cx='96' cy='96' r='80' fill='%2300d9ff'/><circle cx='96' cy='96' r='60' fill='%230a0e27'/><polygon points='96,40 130,90 120,140 72,140 62,90' fill='%2300d9ff'/></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect fill='%230a0e27' width='512' height='512'/><circle cx='256' cy='256' r='200' fill='%2300d9ff'/><circle cx='256' cy='256' r='160' fill='%230a0e27'/><polygon points='256,100 320,200 300,340 212,340 192,200' fill='%2300d9ff'/></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 540 720'><rect fill='%230a0e27' width='540' height='720'/><text x='270' y='360' font-size='48' fill='%2300d9ff' text-anchor='middle'>CanSat GCS</text></svg>",
+      "sizes": "540x720",
+      "type": "image/svg+xml",
+      "form_factor": "narrow"
+    }
+  ],
+  "categories": ["productivity", "utilities"],
+  "prefer_related_applications": false
+}
