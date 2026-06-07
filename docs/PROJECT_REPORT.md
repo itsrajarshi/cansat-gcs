@@ -7,7 +7,7 @@
 | **Author** | Rajarshi Ghosh |
 | **GitHub** | [github.com/itsrajarshi](https://github.com/itsrajarshi) |
 | **LinkedIn** | [linkedin.com/in/itsrajarshi](https://www.linkedin.com/in/itsrajarshi/) |
-| **Program** | ISL / WeGyanik Internship — Aerospace Engineering, Embedded Systems, Avionics, Ground Systems |
+| **Program** | INDIA SPACE LAB |
 | **Project Version** | 1.0.0 |
 | **Date** | June 2026 |
 
