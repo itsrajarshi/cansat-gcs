@@ -56,6 +56,10 @@ export const VIDEO_RESOLUTION_OPTIONS = [
 ] as const;
 
 export const MOCK_TELEMETRY_INTERVAL = 500; // milliseconds
+/** Shorter mock mission so scenarios reach fault windows quickly. */
+export const MOCK_MISSION_DURATION_SEC = 180;
+/** Digit 3 is evaluated after this mission elapsed time (matches ~40% of mock mission). */
+export const SEPARATION_EVAL_SECONDS = Math.floor(MOCK_MISSION_DURATION_SEC * 0.4);
 
 export const STORAGE_KEYS = {
   TELEMETRY_HISTORY: 'cansat_telemetry_history',

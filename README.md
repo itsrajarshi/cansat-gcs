@@ -7,6 +7,17 @@ Professional aerospace-grade Single Page Ground Control Software for CanSat miss
 ![React](https://img.shields.io/badge/react-18+-blue)
 ![TypeScript](https://img.shields.io/badge/typescript-5+-blue)
 
+## Submission deliverables
+
+| Item | Location |
+|------|----------|
+| Deliverables index | [deliverables/README.md](deliverables/README.md) |
+| Project report | [docs/PROJECT_REPORT.md](docs/PROJECT_REPORT.md) |
+| Screenshots | [deliverables/screenshots/](deliverables/screenshots/) |
+| Demo video | [deliverables/demo/DEMO_VIDEO.md](deliverables/demo/DEMO_VIDEO.md) |
+| CSV export sample | [deliverables/samples/exports/csv/](deliverables/samples/exports/csv/) |
+| Graph PNG samples | [deliverables/samples/exports/graphs/](deliverables/samples/exports/graphs/) |
+
 ## ✨ Features
 
 ### Real-Time Telemetry
@@ -491,16 +502,14 @@ Academic use for ISL CanSat Project
 
 ## 👥 Contributors
 
-- Aerospace Systems Engineering Team
-- Ground Control Software Development Team
-- ISL Internship Program
+Rajarshi Ghosh - [itsrajarshi](https://github.com/itsrajarshi) - [LinkedIn](https://www.linkedin.com/in/itsrajarshi/)
 
 ## 📞 Support
 
 For issues, questions, or feedback:
 
 - Create an issue on GitHub
-- Contact ISL support
+- Contact the author
 - Reference the documentation
 
 ## 🔄 Updates & Maintenance

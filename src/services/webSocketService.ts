@@ -60,6 +60,13 @@ export class WebSocketService {
   public setOnError(handler: WebSocketErrorHandler): void {
     this.onError = handler;
   }
+
+  public send(message: string): void {
+    if (!this.isConnected() || !this.socket) {
+      throw new Error('WebSocket is not connected');
+    }
+    this.socket.send(message);
+  }
 }
 
 export const webSocketService = new WebSocketService();

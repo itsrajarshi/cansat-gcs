@@ -6,11 +6,39 @@ import { create } from 'zustand';
 import { TelemetryPacket, TelemetryStats, GPSTrackPoint } from '@/types/telemetry';
 import { CHART_SAMPLE_LIMIT } from '@/utils/constants';
 import { telemetryStorage } from '@/services/telemetryStorage';
+import { isValidGPS } from '@/utils/validators';
+
+function isTrackableGPS(latitude: number, longitude: number): boolean {
+  return isValidGPS(latitude, longitude) && !(latitude === 0 && longitude === 0);
+}
+
+function toContainerTrackPoint(packet: TelemetryPacket): GPSTrackPoint | null {
+  if (!isTrackableGPS(packet.gpsLatitude, packet.gpsLongitude)) return null;
+  return {
+    latitude: packet.gpsLatitude,
+    longitude: packet.gpsLongitude,
+    altitude: packet.gpsAltitude,
+    timestamp: packet.timestamp,
+    packetId: packet.packetId,
+  };
+}
+
+function toPayloadTrackPoint(packet: TelemetryPacket): GPSTrackPoint | null {
+  if (!isTrackableGPS(packet.payloadGpsLatitude, packet.payloadGpsLongitude)) return null;
+  return {
+    latitude: packet.payloadGpsLatitude,
+    longitude: packet.payloadGpsLongitude,
+    altitude: packet.payloadGpsAltitude,
+    timestamp: packet.timestamp,
+    packetId: packet.packetId,
+  };
+}
 
 interface TelemetryState {
   // Data
   packets: TelemetryPacket[];
   gpsTrack: GPSTrackPoint[];
+  payloadGpsTrack: GPSTrackPoint[];
   lastPacket: TelemetryPacket | null;
   isReceiving: boolean;
 
@@ -26,6 +54,7 @@ interface TelemetryState {
   getLastPacket: () => TelemetryPacket | null;
   getAllPackets: () => TelemetryPacket[];
   getGPSTrack: () => GPSTrackPoint[];
+  getPayloadGPSTrack: () => GPSTrackPoint[];
   getStats: () => TelemetryStats;
 }
 
@@ -84,6 +113,7 @@ function calculateStats(packets: TelemetryPacket[]): TelemetryStats {
 export const useTelemetryStore = create<TelemetryState>((set, get) => ({
   packets: [],
   gpsTrack: [],
+  payloadGpsTrack: [],
   lastPacket: null,
   isReceiving: false,
   stats: {
@@ -108,20 +138,17 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
         newPackets.shift();
       }
 
-      // Update GPS track
-      const newGpsTrack = [
-        ...state.gpsTrack,
-        {
-          latitude: packet.gpsLatitude,
-          longitude: packet.gpsLongitude,
-          altitude: packet.gpsAltitude,
-          timestamp: packet.timestamp,
-          packetId: packet.packetId,
-        },
-      ];
+      const containerPoint = toContainerTrackPoint(packet);
+      const payloadPoint = toPayloadTrackPoint(packet);
 
+      const newGpsTrack = containerPoint ? [...state.gpsTrack, containerPoint] : state.gpsTrack;
       if (newGpsTrack.length > CHART_SAMPLE_LIMIT) {
-        newGpsTrack.shift();
+        newGpsTrack.splice(0, newGpsTrack.length - CHART_SAMPLE_LIMIT);
+      }
+
+      const newPayloadGpsTrack = payloadPoint ? [...state.payloadGpsTrack, payloadPoint] : state.payloadGpsTrack;
+      if (newPayloadGpsTrack.length > CHART_SAMPLE_LIMIT) {
+        newPayloadGpsTrack.splice(0, newPayloadGpsTrack.length - CHART_SAMPLE_LIMIT);
       }
 
       const stats = calculateStats(newPackets);
@@ -129,6 +156,7 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
       return {
         packets: newPackets,
         gpsTrack: newGpsTrack,
+        payloadGpsTrack: newPayloadGpsTrack,
         lastPacket: packet,
         stats,
       };
@@ -147,18 +175,21 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
         newPackets.splice(0, startIndex);
       }
 
-      const gpsTrackPoints = packets.map((packet) => ({
-        latitude: packet.gpsLatitude,
-        longitude: packet.gpsLongitude,
-        altitude: packet.gpsAltitude,
-        timestamp: packet.timestamp,
-        packetId: packet.packetId,
-      }));
+      const gpsTrackPoints = packets
+        .map(toContainerTrackPoint)
+        .filter((point): point is GPSTrackPoint => point !== null);
+      const payloadGpsTrackPoints = packets
+        .map(toPayloadTrackPoint)
+        .filter((point): point is GPSTrackPoint => point !== null);
 
       const newGpsTrack = [...state.gpsTrack, ...gpsTrackPoints];
       if (newGpsTrack.length > CHART_SAMPLE_LIMIT) {
-        const startIndex = newGpsTrack.length - CHART_SAMPLE_LIMIT;
-        newGpsTrack.splice(0, startIndex);
+        newGpsTrack.splice(0, newGpsTrack.length - CHART_SAMPLE_LIMIT);
+      }
+
+      const newPayloadGpsTrack = [...state.payloadGpsTrack, ...payloadGpsTrackPoints];
+      if (newPayloadGpsTrack.length > CHART_SAMPLE_LIMIT) {
+        newPayloadGpsTrack.splice(0, newPayloadGpsTrack.length - CHART_SAMPLE_LIMIT);
       }
 
       const stats = calculateStats(newPackets);
@@ -166,6 +197,7 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
       return {
         packets: newPackets,
         gpsTrack: newGpsTrack,
+        payloadGpsTrack: newPayloadGpsTrack,
         lastPacket: packets[packets.length - 1],
         stats,
       };
@@ -178,6 +210,7 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
     set({
       packets: [],
       gpsTrack: [],
+      payloadGpsTrack: [],
       lastPacket: null,
       stats: {
         totalPackets: 0,
@@ -214,6 +247,10 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
 
   getGPSTrack: () => {
     return get().gpsTrack;
+  },
+
+  getPayloadGPSTrack: () => {
+    return get().payloadGpsTrack;
   },
 
   getStats: () => {

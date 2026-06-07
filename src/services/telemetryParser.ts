@@ -4,7 +4,7 @@
  */
 
 import { TelemetryPacket, ParsedTelemetry, ErrorCode } from '@/types/telemetry';
-import { SAFE_DESCENT_RATE } from '@/utils/constants';
+import { SAFE_DESCENT_RATE, SEPARATION_EVAL_SECONDS } from '@/utils/constants';
 import {
   isValidAltitude,
   isValidDescentRate,
@@ -286,13 +286,38 @@ function parseExtendedFields(fields: string[]): ParsedTelemetry {
 }
 
 /**
+ * True when the vehicle is descending and descent-rate digit 1 applies.
+ */
+export function isDescendingPhase(descentRate: number): boolean {
+  return descentRate < -0.5;
+}
+
+/**
+ * Digit 3 applies only after the separation window (or explicit failure status).
+ */
+export function isSeparationFailure(packet: TelemetryPacket): boolean {
+  const status = packet.payloadStatus.trim();
+  if (status === 'Attached' || status === 'Pending') {
+    return false;
+  }
+  if (status === 'Separation Failed') {
+    return true;
+  }
+  if (packet.payloadSeparationSuccess) {
+    return false;
+  }
+  return parseMissionTime(packet.missionTime) >= SEPARATION_EVAL_SECONDS;
+}
+
+/**
  * Calculate error codes based on telemetry values
  */
 export function calculateErrorCode(packet: TelemetryPacket): ErrorCode {
-  // Digit 1: Descent Rate
-  // Safe if abs(descentRate) is within 8–10 m/s.
+  // Digit 1: Descent rate — only evaluated while descending (negative rate).
   const descentRateMag = Math.abs(packet.descentRate);
-  const descentRateFault = descentRateMag < SAFE_DESCENT_RATE.MIN || descentRateMag > SAFE_DESCENT_RATE.MAX;
+  const descentRateFault =
+    isDescendingPhase(packet.descentRate) &&
+    (descentRateMag < SAFE_DESCENT_RATE.MIN || descentRateMag > SAFE_DESCENT_RATE.MAX);
 
   // Digit 2: GPS Availability
   // Treat GPS as unavailable when it's explicitly invalid or (0,0) which is commonly used as "no fix".
@@ -300,7 +325,7 @@ export function calculateErrorCode(packet: TelemetryPacket): ErrorCode {
     (packet.gpsLatitude === 0 && packet.gpsLongitude === 0) || !isValidGPS(packet.gpsLatitude, packet.gpsLongitude);
 
   // Digit 3: Payload Separation
-  const separationFailure = !packet.payloadSeparationSuccess;
+  const separationFailure = isSeparationFailure(packet);
 
   // Digit 4: Emergency Parachute
   const parachuteActive = packet.emergencyParachuteActive;

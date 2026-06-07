@@ -1,13 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useTelemetryStore } from '@/store/telemetryStore';
 import { useMissionStore } from '@/store/missionStore';
-import { SimulationScenarioKind, TelemetrySimulator } from '@/services/telemetrySimulator';
+import { MissionStage, SimulationScenarioKind, TelemetrySimulator } from '@/services/telemetrySimulator';
 import { parseMissionTime, parseTelemetry } from '@/services/telemetryParser';
+import { SCENARIO_PREVIEW_PROGRESS } from '@/services/scenarioCatalog';
+import { MOCK_MISSION_DURATION_SEC } from '@/utils/constants';
 
 import ControlBar, { TelemetrySourceKind } from '@/components/layout/ControlBar';
-import Card from '@/components/common/Card';
+import Footer from '@/components/layout/Footer';
 import TelemetryDisplay from '@/components/telemetry/TelemetryDisplay';
 import ErrorCodeDisplay from '@/components/telemetry/ErrorCodeDisplay';
+import TelemetryScenariosPanel from '@/components/telemetry/TelemetryScenariosPanel';
 import { AltitudeChart, TemperatureChart, VoltageChart, PressureChart, DescentRateChart } from '@/components/charts/Charts';
 import GPSMap from '@/components/map/GPSMap';
 import OrientationIndicator from '@/components/orientation/OrientationIndicator';
@@ -15,6 +18,14 @@ import MissionControlPanel from '@/components/mission/MissionControlPanel';
 import VideoStream from '@/components/video/VideoStream';
 import { webSocketService } from '@/services/webSocketService';
 import { serialService } from '@/services/webSerialService';
+import {
+  CommandTransport,
+  MissionCommandType,
+  sendMissionCommand,
+  sendSyncTimeCommand,
+  tryHandleCommandLine,
+  waitForSyncTimeAck,
+} from '@/services/missionCommandService';
 import { exportSvgToPNG, generateExportFilename } from '@/services/dataExport';
 import { telemetryStorage } from '@/services/telemetryStorage';
 import { CHART_SAMPLE_LIMIT } from '@/utils/constants';
@@ -27,29 +38,86 @@ export const Dashboard: React.FC = () => {
   const [simulator, setSimulator] = useState<TelemetrySimulator | null>(null);
   const [simulationInterval, setSimulationInterval] = useState<NodeJS.Timeout | null>(null);
   const [isExportingGraphs, setIsExportingGraphs] = useState(false);
+  const [missionStage, setMissionStage] = useState<MissionStage | null>(null);
+
+  const getActiveTransport = useCallback((): CommandTransport | null => {
+    if (telemetrySource === 'serial' && serialService.getConnectionStatus()) return 'serial';
+    if (telemetrySource === 'websocket' && webSocketService.isConnected()) return 'websocket';
+    return null;
+  }, [telemetrySource]);
+
+  const handleInboundLine = useCallback((raw: string, source: 'WebSocket' | 'Serial') => {
+    if (tryHandleCommandLine(raw)) return;
+
+    const parsed = parseTelemetry(raw);
+    if (!parsed.success || !parsed.data) {
+      missionStore.addLog('error', `Telemetry parse failed (${source})`, { error: parsed.error, raw });
+      return;
+    }
+    telemetryStore.addPacket(parsed.data);
+    missionStore.updateElapsedTime(parseMissionTime(parsed.data.missionTime));
+    missionStore.updateSystemStatus({
+      lastHeartbeat: Date.now(),
+      signalStrength: source === 'Serial' ? 70 : 80,
+      latency: source === 'Serial' ? 10 + Math.random() * 20 : 20 + Math.random() * 40,
+      systemHealth: 97 - Math.random() * 6,
+    });
+  }, []);
+
+  const handleExecuteMissionCommand = useCallback(
+    async (type: MissionCommandType): Promise<'hardware' | 'simulated'> => {
+      const transport = getActiveTransport();
+      if (!transport) return 'simulated';
+
+      await sendMissionCommand(type, transport);
+      return 'hardware';
+    },
+    [getActiveTransport]
+  );
+
+  const createSimulator = useCallback(
+    (kind: SimulationScenarioKind) =>
+      new TelemetrySimulator({
+        targetAltitude: 3000,
+        missionDuration: MOCK_MISSION_DURATION_SEC,
+        startLatitude: 28.5355,
+        startLongitude: 77.391,
+        scenarioKind: kind,
+      }),
+    []
+  );
 
   // Initialize simulator
   useEffect(() => {
-    const sim = new TelemetrySimulator({
-      targetAltitude: 3000,
-      missionDuration: 600,
-      startLatitude: 28.5355,
-      startLongitude: 77.391,
-      scenarioKind,
-    });
-    setSimulator(sim);
-
+    setSimulator(createSimulator(scenarioKind));
     missionStore.addLog('info', 'Dashboard initialized');
-  }, []);
+  }, [createSimulator]);
 
-  // Apply scenario changes to the simulator (mock telemetry only).
-  useEffect(() => {
-  if (!simulator) return;
-  if (telemetrySource !== 'mock') return;
-  if (telemetryStore.isReceiving) return;
+  const handleScenarioChange = (kind: SimulationScenarioKind) => {
+    setScenarioKind(kind);
+    if (telemetrySource !== 'mock' || telemetryStore.isReceiving) return;
 
-  simulator.setScenarioKind(scenarioKind);
-}, [scenarioKind, simulator, telemetrySource, telemetryStore.isReceiving]);
+    const sim = createSimulator(kind);
+    setSimulator(sim);
+    telemetryStore.clearPackets();
+    setMissionStage(null);
+    missionStore.addLog('info', `Mock scenario set to ${kind}`);
+  };
+
+  const handlePreviewScenarioPacket = () => {
+    if (!simulator || telemetrySource !== 'mock' || telemetryStore.isReceiving) return;
+
+    const previewSim = createSimulator(scenarioKind);
+    previewSim.fastForwardToProgress(SCENARIO_PREVIEW_PROGRESS[scenarioKind]);
+    const packet = previewSim.generatePacket();
+    telemetryStore.addPacket(packet);
+    setMissionStage(previewSim.getStage());
+    missionStore.updateElapsedTime(previewSim.getElapsedTime());
+    missionStore.addLog('info', `Preview packet for scenario ${scenarioKind}`, {
+      errorCode: packet.payloadStatus,
+      stage: previewSim.getStage(),
+    });
+  };
 
   // Hydrate telemetry history from local IndexedDB/LocalStorage.
   useEffect(() => {
@@ -93,11 +161,14 @@ export const Dashboard: React.FC = () => {
 
         missionStore.updateSystemStatus({ connectionStatus: 'connected' });
 
+        simulator.setScenarioKind(scenarioKind);
+
         const interval = setInterval(() => {
           if (!simulator) return;
 
           const packet = simulator.generatePacket();
           telemetryStore.addPacket(packet);
+          setMissionStage(simulator.getStage());
 
           // Update mission elapsed time
           missionStore.updateElapsedTime(simulator.getElapsedTime());
@@ -125,19 +196,7 @@ export const Dashboard: React.FC = () => {
         }
 
         webSocketService.setOnMessage((raw) => {
-          const parsed = parseTelemetry(raw);
-          if (!parsed.success || !parsed.data) {
-            missionStore.addLog('error', 'Telemetry parse failed (WebSocket)', { error: parsed.error, raw });
-            return;
-          }
-          telemetryStore.addPacket(parsed.data);
-          missionStore.updateElapsedTime(parseMissionTime(parsed.data.missionTime));
-          missionStore.updateSystemStatus({
-            lastHeartbeat: Date.now(),
-            signalStrength: 80,
-            latency: 20 + Math.random() * 40,
-            systemHealth: 98 - Math.random() * 6,
-          });
+          handleInboundLine(raw, 'WebSocket');
         });
 
         webSocketService.setOnError((err) => {
@@ -165,19 +224,7 @@ export const Dashboard: React.FC = () => {
         }
 
         serialService.onData((raw: string) => {
-          const parsed = parseTelemetry(raw);
-          if (!parsed.success || !parsed.data) {
-            missionStore.addLog('error', 'Telemetry parse failed (Serial)', { error: parsed.error, raw });
-            return;
-          }
-          telemetryStore.addPacket(parsed.data);
-          missionStore.updateElapsedTime(parseMissionTime(parsed.data.missionTime));
-          missionStore.updateSystemStatus({
-            lastHeartbeat: Date.now(),
-            signalStrength: 70,
-            latency: 10 + Math.random() * 20,
-            systemHealth: 97 - Math.random() * 6,
-          });
+          handleInboundLine(raw, 'Serial');
         });
 
         try {
@@ -218,8 +265,31 @@ export const Dashboard: React.FC = () => {
   };
 
   const handleSyncPCTime = () => {
-    missionStore.addLog('success', 'PC time synced', { pcTime: Date.now() });
-    missionStore.updateSystemStatus({ lastHeartbeat: Date.now() });
+    void (async () => {
+      const transport = getActiveTransport();
+      const pcTime = Date.now();
+
+      if (!transport) {
+        missionStore.addLog('success', 'PC time synced (local only)', { pcTime });
+        missionStore.updateSystemStatus({ lastHeartbeat: pcTime });
+        return;
+      }
+
+      try {
+        const sentAt = await sendSyncTimeCommand(transport);
+        missionStore.addLog('info', 'Sync PC Time command sent', { pcTime: sentAt, transport });
+        const ackReceived = await waitForSyncTimeAck(5000);
+
+        if (ackReceived) {
+          missionStore.addLog('success', 'PC time synced (ACK received)', { pcTime: sentAt, transport });
+        } else {
+          missionStore.addLog('warning', 'Sync PC Time sent — no ACK within timeout', { pcTime: sentAt, transport });
+        }
+        missionStore.updateSystemStatus({ lastHeartbeat: Date.now() });
+      } catch (error) {
+        missionStore.addLog('error', 'Sync PC Time failed', { error });
+      }
+    })();
   };
 
   const handleExportGraphPNG = async () => {
@@ -249,8 +319,9 @@ export const Dashboard: React.FC = () => {
 
   const handleResetPackets = () => {
     if (simulator) {
-      simulator.reset();
+      simulator.setScenarioKind(scenarioKind);
     }
+    setMissionStage(null);
     missionStore.addLog('info', 'Mission reset - packets cleared');
   };
 
@@ -271,49 +342,47 @@ export const Dashboard: React.FC = () => {
   const lastPacket = telemetryStore.getLastPacket();
 
   return (
-    <div className="min-h-screen bg-aerospace-darker text-gray-100">
-      {/* Control Bar */}
-      <ControlBar
-        onStartTelemetry={handleStartTelemetry}
-        onStopTelemetry={handleStopTelemetry}
-        onResetPackets={handleResetPackets}
-        telemetrySource={telemetrySource}
-        onTelemetrySourceChange={setTelemetrySource}
-        onSyncPCTime={handleSyncPCTime}
-        onExportGraphPNG={isExportingGraphs ? undefined : handleExportGraphPNG}
-      />
+    <div className="flex h-screen flex-col overflow-hidden bg-aerospace-darker text-gray-100">
+      {/* Sticky header */}
+      <header className="sticky top-0 z-50 shrink-0 border-b border-aerospace-secondary/20 bg-aerospace-darker/90 backdrop-blur-md supports-[backdrop-filter]:bg-aerospace-darker/75">
+        <ControlBar
+          onStartTelemetry={handleStartTelemetry}
+          onStopTelemetry={handleStopTelemetry}
+          onResetPackets={handleResetPackets}
+          telemetrySource={telemetrySource}
+          onTelemetrySourceChange={setTelemetrySource}
+          onSyncPCTime={handleSyncPCTime}
+          onExportGraphPNG={isExportingGraphs ? undefined : handleExportGraphPNG}
+        />
+      </header>
 
-      {/* Main Content */}
-      <div className="p-4 space-y-4">
-        <Card title="Telemetry Scenarios" subtitle="Mock-only scenario injection for testing">
-          <div className="flex flex-wrap items-center gap-3">
-            <select
-              value={scenarioKind}
-              onChange={(e) => setScenarioKind(e.target.value as SimulationScenarioKind)}
-              disabled={telemetryStore.isReceiving || telemetrySource !== 'mock'}
-              className="px-3 py-2 bg-aerospace-dark border border-aerospace-secondary/30 rounded text-sm text-gray-200"
-            >
-              <option value="normal">Normal Mission</option>
-              <option value="gps_failure">GPS Failure</option>
-              <option value="separation_failure">Separation Failure</option>
-              <option value="parachute_deployment">Parachute Deployment</option>
-              <option value="battery_failure">Battery Failure</option>
-              <option value="sensor_failure">Sensor Failure</option>
-              <option value="packet_loss">Packet Loss</option>
-            </select>
-
-            <div className="text-xs text-gray-400">
-              Switch scenarios to verify fault digits, map tracking, charts, and command behaviors.
-            </div>
-          </div>
-        </Card>
+      {/* Scrollable main content */}
+      <main className="flex-1 overflow-y-auto overscroll-y-contain p-4 space-y-4">
+        <TelemetryScenariosPanel
+          scenarioKind={scenarioKind}
+          onScenarioChange={handleScenarioChange}
+          disabled={telemetryStore.isReceiving || telemetrySource !== 'mock'}
+          isReceiving={telemetryStore.isReceiving}
+          lastPacket={lastPacket}
+          onPreviewPacket={
+            telemetrySource === 'mock' && !telemetryStore.isReceiving ? handlePreviewScenarioPacket : undefined
+          }
+        />
 
         {/* Top Section: Telemetry & Error Status */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
-            <TelemetryDisplay packet={lastPacket} label="Live Telemetry" />
+            <TelemetryDisplay
+              packet={lastPacket}
+              label="Live Telemetry"
+              activeScenario={telemetrySource === 'mock' ? scenarioKind : null}
+              missionStage={missionStage}
+            />
           </div>
-          <ErrorCodeDisplay packet={lastPacket} />
+          <ErrorCodeDisplay
+            packet={lastPacket}
+            activeScenario={telemetrySource === 'mock' ? scenarioKind : null}
+          />
         </div>
 
         {/* Charts Section */}
@@ -335,12 +404,15 @@ export const Dashboard: React.FC = () => {
             pitch={lastPacket ? lastPacket.pitch : 0}
             yaw={lastPacket ? lastPacket.yaw : 0}
           />
-          <MissionControlPanel />
+          <MissionControlPanel onExecuteCommand={handleExecuteMissionCommand} />
         </div>
 
         {/* Video Stream */}
         <VideoStream />
-      </div>
+      </main>
+
+      {/* Sticky footer */}
+      <Footer />
     </div>
   );
 };

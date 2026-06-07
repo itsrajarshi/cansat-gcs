@@ -3,20 +3,76 @@
  */
 
 import { TelemetryPacket } from '@/types/telemetry';
+import { calculateErrorCode } from '@/services/telemetryParser';
+
+function csvEscape(value: string | number | boolean): string {
+  const str = String(value);
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
 
 /**
  * Export telemetry data as CSV
  */
 export function exportTelemetryCSV(packets: TelemetryPacket[]): string {
-  // Assignment-required minimal CSV export
-  const headers = ['Timestamp', 'Altitude', 'Pressure', 'Temperature'];
+  const headers = [
+    'Timestamp',
+    'PacketId',
+    'MissionTime',
+    'ErrorCode',
+    'Altitude',
+    'Pressure',
+    'Temperature',
+    'Voltage',
+    'GpsLatitude',
+    'GpsLongitude',
+    'GpsAltitude',
+    'DescentRate',
+    'PayloadAltitude',
+    'PayloadTemperature',
+    'PayloadVoltage',
+    'PayloadGpsLatitude',
+    'PayloadGpsLongitude',
+    'PayloadGpsAltitude',
+    'PayloadSeparationSuccess',
+    'PayloadStatus',
+    'Roll',
+    'Pitch',
+    'Yaw',
+    'EmergencyParachuteActive',
+  ];
 
-  const rows = packets.map((packet) => [
-    new Date(packet.timestamp).toISOString(),
-    packet.altitude.toFixed(2),
-    packet.pressure.toFixed(2),
-    packet.temperature.toFixed(2),
-  ]);
+  const rows = packets.map((packet) => {
+    const errorCode = calculateErrorCode(packet).code;
+    return [
+      new Date(packet.timestamp).toISOString(),
+      packet.packetId,
+      packet.missionTime,
+      errorCode,
+      packet.altitude.toFixed(2),
+      packet.pressure.toFixed(2),
+      packet.temperature.toFixed(2),
+      packet.voltage.toFixed(2),
+      packet.gpsLatitude.toFixed(6),
+      packet.gpsLongitude.toFixed(6),
+      packet.gpsAltitude.toFixed(2),
+      packet.descentRate.toFixed(2),
+      packet.payloadAltitude.toFixed(2),
+      packet.payloadTemperature.toFixed(2),
+      packet.payloadVoltage.toFixed(2),
+      packet.payloadGpsLatitude.toFixed(6),
+      packet.payloadGpsLongitude.toFixed(6),
+      packet.payloadGpsAltitude.toFixed(2),
+      packet.payloadSeparationSuccess ? '1' : '0',
+      packet.payloadStatus,
+      packet.roll.toFixed(2),
+      packet.pitch.toFixed(2),
+      packet.yaw.toFixed(2),
+      packet.emergencyParachuteActive ? '1' : '0',
+    ].map(csvEscape);
+  });
 
   const csvContent = [
     headers.join(','),

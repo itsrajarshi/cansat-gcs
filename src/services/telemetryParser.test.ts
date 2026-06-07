@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { calculateErrorCode, parseTelemetry } from '@/services/telemetryParser';
+import {
+  calculateErrorCode,
+  isDescendingPhase,
+  isSeparationFailure,
+  parseTelemetry,
+} from '@/services/telemetryParser';
 import { TelemetryPacket } from '@/types/telemetry';
 
 function makePacket(overrides: Partial<TelemetryPacket>): TelemetryPacket {
@@ -105,11 +110,55 @@ describe('telemetryParser.calculateErrorCode', () => {
       gpsLatitude: 0,
       gpsLongitude: 0,
       payloadSeparationSuccess: false,
+      payloadStatus: 'Separation Failed',
       emergencyParachuteActive: true,
     });
 
     const code = calculateErrorCode(packet);
     expect(code.code).toBe('1111');
+  });
+
+  it('ignores ascent climb rate for digit 1', () => {
+    const packet = makePacket({
+      descentRate: 15,
+      payloadSeparationSuccess: false,
+      payloadStatus: 'Attached',
+    });
+
+    const code = calculateErrorCode(packet);
+    expect(code.code).toBe('0000');
+    expect(isDescendingPhase(packet.descentRate)).toBe(false);
+  });
+
+  it('ignores separation digit while payload is still attached', () => {
+    const packet = makePacket({
+      descentRate: -9,
+      payloadSeparationSuccess: false,
+      payloadStatus: 'Attached',
+    });
+
+    expect(isSeparationFailure(packet)).toBe(false);
+    expect(calculateErrorCode(packet).code).toBe('0000');
+  });
+
+  it('returns 0010 for separation failure status', () => {
+    const packet = makePacket({
+      descentRate: -9,
+      payloadSeparationSuccess: false,
+      payloadStatus: 'Separation Failed',
+    });
+
+    expect(calculateErrorCode(packet).code).toBe('0010');
+  });
+
+  it('returns 1000 for unsafe descent rate while descending', () => {
+    const packet = makePacket({
+      descentRate: -14,
+      payloadSeparationSuccess: true,
+      payloadStatus: 'Separated',
+    });
+
+    expect(calculateErrorCode(packet).code).toBe('1000');
   });
 });
 

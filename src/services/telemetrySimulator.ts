@@ -12,6 +12,7 @@ export type SimulationScenarioKind =
   | 'gps_failure'
   | 'separation_failure'
   | 'parachute_deployment'
+  | 'descent_rate_fault'
   | 'battery_failure'
   | 'sensor_failure'
   | 'packet_loss';
@@ -79,7 +80,7 @@ export class TelemetrySimulator {
     const payloadGpsAltitude = payloadAltitude + (Math.random() - 0.5) * 5;
 
     const payloadSeparationSuccess = this.calculatePayloadSeparationSuccess();
-    const payloadStatus = payloadSeparationSuccess ? 'Separated' : 'Not Separated';
+    const payloadStatus = this.getPayloadStatus(payloadSeparationSuccess);
 
     const { roll, pitch, yaw } = this.calculateAttitude();
     const emergencyParachuteActive = this.calculateEmergencyParachuteActive(payloadSeparationSuccess);
@@ -136,6 +137,19 @@ export class TelemetrySimulator {
     this.reset();
   }
 
+  public getScenarioKind(): SimulationScenarioKind {
+    return this.scenarioKind;
+  }
+
+  /** Advance simulation time without emitting packets (for scenario preview). */
+  public fastForwardToProgress(targetProgress: number): void {
+    const clamped = Math.max(0, Math.min(1, targetProgress));
+    const targetTime = clamped * this.config.missionDuration;
+    while (this.elapsedTime < targetTime) {
+      this.generatePacket();
+    }
+  }
+
   /**
    * Update mission stage based on elapsed time and altitude
    */
@@ -168,13 +182,28 @@ export class TelemetrySimulator {
     return [this.baseLatitude + latDrift, this.baseLongitude + lonDrift];
   }
 
+  private isPreSeparationStage(): boolean {
+    return this.currentStage === 'launch' || this.currentStage === 'ascent' || this.currentStage === 'apogee';
+  }
+
+  private getPayloadStatus(separationSucceeded: boolean): string {
+    if (this.isPreSeparationStage()) {
+      return 'Attached';
+    }
+    if (this.scenarioKind === 'separation_failure') {
+      return 'Separation Failed';
+    }
+    return separationSucceeded ? 'Separated' : 'Not Separated';
+  }
+
   private calculatePayloadSeparationSuccess(): boolean {
-    // Default behavior: separation succeeds when entering/descenting after the separation phase.
-    if (this.scenarioKind === 'separation_failure' && this.currentStage !== 'launch' && this.currentStage !== 'ascent' && this.currentStage !== 'apogee') {
+    if (this.isPreSeparationStage()) {
       return false;
     }
-
-    return this.currentStage === 'separation' || this.currentStage === 'descent' || this.currentStage === 'landing';
+    if (this.scenarioKind === 'separation_failure') {
+      return false;
+    }
+    return true;
   }
 
   private calculateAttitude(): { roll: number; pitch: number; yaw: number } {
@@ -299,8 +328,8 @@ export class TelemetrySimulator {
   private calculateGPS(): [number, number] {
     const progress = this.elapsedTime / this.config.missionDuration;
 
-    // Scenario: GPS failure -> force loss of fix (0,0) during late mission.
-    if (this.scenarioKind === 'gps_failure' && progress > 0.6 && progress < 0.92) {
+    // Scenario: GPS failure -> force loss of fix (0,0) during mid/late mission.
+    if (this.scenarioKind === 'gps_failure' && progress > 0.35 && progress < 0.85) {
       return [0, 0];
     }
 
@@ -322,17 +351,21 @@ export class TelemetrySimulator {
     const progress = this.elapsedTime / this.config.missionDuration;
 
     if (progress < 0.45) {
-      // Ascent: positive rate
+      // Ascent: positive rate (digit 1 ignored while not descending)
       return Math.abs(
         (this.targetAltitude / (0.35 * this.config.missionDuration)) *
         (Math.random() * 0.2 + 0.9)
       );
-    } else {
-      // Descent: negative rate, around 8-10 m/s (safe range)
-      const targetRate = 9;
-      const randomVariation = (Math.random() - 0.5) * 2;
-      return -Math.abs(targetRate + randomVariation);
     }
+
+    if (this.scenarioKind === 'descent_rate_fault') {
+      return -(12 + Math.random() * 4);
+    }
+
+    // Descent: negative rate, around 8-10 m/s (safe range)
+    const targetRate = 9;
+    const randomVariation = (Math.random() - 0.5) * 1.2;
+    return -Math.abs(targetRate + randomVariation);
   }
 
   /**

@@ -4,14 +4,21 @@ import Button from '@/components/common/Button';
 import ConfirmDialog from '@/components/common/ConfirmDialog';
 import { AlertCircle } from 'lucide-react';
 import { useMissionStore } from '@/store/missionStore';
+import { MissionCommandType, waitForCommandAck } from '@/services/missionCommandService';
+
+export type MissionCommandExecutor = (
+  type: MissionCommandType
+) => Promise<'hardware' | 'simulated'>;
 
 interface MissionControlProps {
+  onExecuteCommand?: MissionCommandExecutor;
   onSeparation?: () => void;
   onParachuteDeployment?: () => void;
   onRedundantActivation?: () => void;
 }
 
 export const MissionControlPanel: React.FC<MissionControlProps> = ({
+  onExecuteCommand,
   onSeparation,
   onParachuteDeployment,
   onRedundantActivation,
@@ -25,6 +32,52 @@ export const MissionControlPanel: React.FC<MissionControlProps> = ({
     type: null,
   });
   const [executingCommand, setExecutingCommand] = useState<string | null>(null);
+
+  const runSimulatedLifecycle = (type: MissionCommandType, commandId: string, issuedAt: number) => {
+    const sentAt = issuedAt + 200;
+    const execAt = issuedAt + 650;
+    const ackAt = issuedAt + 900;
+    const finalizeAt = issuedAt + 1350;
+
+    setTimeout(() => {
+      mission.updateCommandStatus(commandId, 'sent');
+      mission.addLog('info', `${commandLabels[type]} Command Sent (simulated)`, { commandId });
+    }, Math.max(0, sentAt - Date.now()));
+
+    setTimeout(() => {
+      mission.updateCommandStatus(commandId, 'executing');
+      mission.addLog('info', `${commandLabels[type]} Execution Started`, { commandId });
+    }, Math.max(0, execAt - Date.now()));
+
+    setTimeout(() => {
+      mission.setCommandAcknowledged(commandId, true);
+      mission.addLog('success', 'ACK Received (simulated)', { commandId });
+    }, Math.max(0, ackAt - Date.now()));
+
+    setTimeout(() => {
+      const success = Math.random() > 0.12;
+      finalizeCommand(type, commandId, success);
+    }, Math.max(0, finalizeAt - Date.now()));
+  };
+
+  const finalizeCommand = (type: MissionCommandType, commandId: string, success: boolean) => {
+    if (success) {
+      mission.updateCommandStatus(commandId, 'completed');
+      mission.setCommandError(commandId, undefined);
+      mission.addLog('success', `${commandLabels[type]} completed successfully`, { commandId });
+
+      if (type === 'separation') onSeparation?.();
+      if (type === 'parachute') onParachuteDeployment?.();
+      if (type === 'redundant_activation') onRedundantActivation?.();
+    } else {
+      mission.updateCommandStatus(commandId, 'failed');
+      mission.setCommandError(commandId, 'No ACK / Timeout');
+      mission.addLog('error', `${commandLabels[type]} failed`, { commandId });
+    }
+
+    setExecutingCommand(null);
+    setConfirmDialog({ isOpen: false, type: null });
+  };
 
   const handleConfirm = async () => {
     if (!confirmDialog.type) return;
@@ -45,46 +98,34 @@ export const MissionControlPanel: React.FC<MissionControlProps> = ({
       acknowledged: false,
     });
 
-    // Command lifecycle simulation: pending -> sent -> executing -> ACK -> completed/failed
-    const sentAt = issuedAt + 200;
-    const execAt = issuedAt + 650;
-    const ackAt = issuedAt + 900;
-    const finalizeAt = issuedAt + 1350;
+    try {
+      const mode = (await onExecuteCommand?.(type)) ?? 'simulated';
 
-    setTimeout(() => {
-      mission.updateCommandStatus(commandId, 'sent');
-      mission.addLog('info', `${commandLabels[type]} Command Sent`, { commandId });
-    }, Math.max(0, sentAt - Date.now()));
+      if (mode === 'hardware') {
+        mission.updateCommandStatus(commandId, 'sent');
+        mission.addLog('info', `${commandLabels[type]} Command Sent`, { commandId });
+        mission.updateCommandStatus(commandId, 'executing');
+        mission.addLog('info', `${commandLabels[type]} Execution Started`, { commandId });
 
-    setTimeout(() => {
-      mission.updateCommandStatus(commandId, 'executing');
-      mission.addLog('info', `${commandLabels[type]} Execution Started`, { commandId });
-    }, Math.max(0, execAt - Date.now()));
+        const ackReceived = await waitForCommandAck(type, 5000);
 
-    setTimeout(() => {
-      mission.setCommandAcknowledged(commandId, true);
-      mission.addLog('success', 'ACK Received', { commandId });
-    }, Math.max(0, ackAt - Date.now()));
+        if (ackReceived) {
+          mission.setCommandAcknowledged(commandId, true);
+          mission.addLog('success', 'ACK Received', { commandId });
+        }
 
-    setTimeout(() => {
-      const success = Math.random() > 0.12;
-      if (success) {
-        mission.updateCommandStatus(commandId, 'completed');
-        mission.setCommandError(commandId, undefined);
-        mission.addLog('success', `${commandLabels[type]} completed successfully`, { commandId });
-
-        if (type === 'separation') onSeparation?.();
-        if (type === 'parachute') onParachuteDeployment?.();
-        if (type === 'redundant_activation') onRedundantActivation?.();
-      } else {
-        mission.updateCommandStatus(commandId, 'failed');
-        mission.setCommandError(commandId, 'No ACK / Timeout');
-        mission.addLog('error', `${commandLabels[type]} failed`, { commandId });
+        finalizeCommand(type, commandId, ackReceived);
+        return;
       }
 
+      runSimulatedLifecycle(type, commandId, issuedAt);
+    } catch (error) {
+      mission.updateCommandStatus(commandId, 'failed');
+      mission.setCommandError(commandId, error instanceof Error ? error.message : 'Command send failed');
+      mission.addLog('error', `${commandLabels[type]} send failed`, { commandId, error });
       setExecutingCommand(null);
       setConfirmDialog({ isOpen: false, type: null });
-    }, Math.max(0, finalizeAt - Date.now()));
+    }
   };
 
   const commandLabels = {

@@ -57,7 +57,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   };
 
   return (
-    <Card className="rounded-none border-b border-x-0 border-t-0">
+    <Card className="rounded-none border-0 shadow-none bg-transparent">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Left Section: Status */}
         <div className="flex items-center gap-3">
@@ -113,7 +113,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
             onClick={handleReset}
           >
             <RotateCcw className="w-4 h-4" />
-            Reset
+            Reset Packet
           </Button>
 
           <Button size="sm" variant="outline" onClick={onSyncPCTime} disabled={!onSyncPCTime}>
@@ -130,7 +130,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
             loading={isExporting}
           >
             <Download className="w-4 h-4" />
-            CSV
+            Export CSV
           </Button>
 
           <Button
@@ -141,7 +141,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
             title="Export graphs as PNG"
           >
             <Image className="w-4 h-4" />
-            Graph PNG
+            Export Graph
           </Button>
         </div>
       </div>
